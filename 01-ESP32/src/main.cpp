@@ -4,17 +4,26 @@
 // Pin del LED incorporado del ESP32 (generalmente GPIO 2)
 #define LED_PIN 2
 
-// Intervalo de parpadeo en milisegundos
+// Intervalos de tiempo en milisegundos
 #define BLINK_INTERVAL 500
+#define WIFI_CHECK_INTERVAL 10000  // Verificar WiFi cada 10 segundos
+#define WIFI_TIMEOUT 15000         // Timeout de conexión WiFi
 
-// Credenciales WiFi - REEMPLAZA CON TUS DATOS
+// Credenciales WiFi
 const char* ssid = "Flia_Agreda";
 const char* password = "777XonarGen";
 
-// Variable para controlar el estado de conexión WiFi
-bool wifiConnected = false;
+// Variables de estado
+static bool wifiConnected = false;
+static bool ledState = false;
+static unsigned long lastBlinkTime = 0;
+static unsigned long lastWifiCheck = 0;
+static unsigned long wifiStartTime = 0;
 
+// Declaraciones de funciones
 void connectToWiFi();
+void handleLEDBlink();
+void handleWiFiStatus();
 
 void setup() {
   // Configurar el pin del LED como salida
@@ -26,52 +35,70 @@ void setup() {
   
   // Conectar a WiFi
   connectToWiFi();
+  
+  // Inicializar variables de tiempo
+  lastBlinkTime = millis();
+  lastWifiCheck = millis();
 }
 
 void connectToWiFi() {
   Serial.println("Conectando a WiFi...");
   WiFi.begin(ssid, password);
+  wifiStartTime = millis();
+}
+
+void handleWiFiStatus() {
+  unsigned long currentTime = millis();
   
-  // Intentar conectar con timeout
-  int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
-    delay(500);
-    Serial.print(".");
-    attempts++;
+  // Verificar WiFi solo cada WIFI_CHECK_INTERVAL
+  if (currentTime - lastWifiCheck >= WIFI_CHECK_INTERVAL) {
+    lastWifiCheck = currentTime;
+    
+    wl_status_t wifiStatus = WiFi.status();
+    
+    if (wifiStatus == WL_CONNECTED && !wifiConnected) {
+      wifiConnected = true;
+      Serial.println("¡WiFi conectado exitosamente!");
+      Serial.print("IP: ");
+      Serial.println(WiFi.localIP());
+    } else if (wifiStatus != WL_CONNECTED && wifiConnected) {
+      wifiConnected = false;
+      Serial.println("WiFi desconectado");
+    } else if (wifiStatus != WL_CONNECTED && !wifiConnected) {
+      // Verificar timeout de conexión inicial
+      if (currentTime - wifiStartTime >= WIFI_TIMEOUT) {
+        Serial.println("Timeout WiFi - reintentando...");
+        connectToWiFi();
+      }
+    }
   }
+}
+
+void handleLEDBlink() {
+  unsigned long currentTime = millis();
   
-  if (WiFi.status() == WL_CONNECTED) {
-    wifiConnected = true;
-    Serial.println("");
-    Serial.println("¡WiFi conectado exitosamente!");
-    Serial.print("Dirección IP asignada: ");
-    Serial.println(WiFi.localIP());
-  } else {
-    Serial.println("");
-    Serial.println("Error: No se pudo conectar a WiFi");
-    Serial.println("Verifica tus credenciales y que la red esté disponible");
+  // Parpadear LED sin bloquear usando millis()
+  if (currentTime - lastBlinkTime >= BLINK_INTERVAL) {
+    lastBlinkTime = currentTime;
+    ledState = !ledState;
+    digitalWrite(LED_PIN, ledState);
+    
+    // Solo imprimir estado del LED ocasionalmente para reducir overhead
+    static int blinkCount = 0;
+    if (++blinkCount % 20 == 0) {  // Cada 20 parpadeos (10 segundos)
+      Serial.print("LED: ");
+      Serial.println(ledState ? "ON" : "OFF");
+    }
   }
 }
 
 void loop() {
-  // Verificar conexión WiFi periódicamente
-  if (!wifiConnected && WiFi.status() == WL_CONNECTED) {
-    wifiConnected = true;
-    Serial.println("WiFi reconectado!");
-    Serial.print("Dirección IP: ");
-    Serial.println(WiFi.localIP());
-  } else if (wifiConnected && WiFi.status() != WL_CONNECTED) {
-    wifiConnected = false;
-    Serial.println("WiFi desconectado");
-  }
+  // Manejar estado WiFi de forma no bloqueante
+  handleWiFiStatus();
   
-  // Parpadear el LED
-  digitalWrite(LED_PIN, HIGH);
-  Serial.println("LED ON");
-  delay(BLINK_INTERVAL);
+  // Manejar parpadeo LED de forma no bloqueante
+  handleLEDBlink();
   
-  digitalWrite(LED_PIN, LOW);
-  Serial.println("LED OFF");
-  delay(BLINK_INTERVAL);
+  // El loop ahora es muy eficiente - no hay delays bloqueantes
 }
 
